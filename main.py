@@ -23,3 +23,10 @@ products = [
 @app.get("/products", response_model=list[Product])
 def show_products():
     return products
+
+@app.get("/products/{id}")
+def get_product(id: int):
+    for product in products:
+        if product.id == id:
+            return product
+    return {"error": "Product not found"}
