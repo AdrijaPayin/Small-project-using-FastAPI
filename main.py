@@ -30,3 +30,21 @@ def get_product(id: int):
         if product.id == id:
             return product
     return {"error": "Product not found"}
+
+@app.post("/products", response_model=Product)
+def add_product(product: Product):
+    products.append(product)
+    return product
+
+@app.put("/products/{id}")
+def update_product(id: int, updated_product: Product):
+    for index, product in enumerate(products):
+        if product.id == id:
+            products[index] = updated_product
+            return updated_product
+        
+@app.delete("/products/{id}")
+def delete_product(id: int):
+    for index, product in enumerate(products):
+        if product.id == id:
+            return products.pop(index)
