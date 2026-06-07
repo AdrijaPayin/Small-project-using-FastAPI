@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from models import Product
+from database import session, engine
+import database_models
 
+database_models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 @app.get("/")
@@ -20,8 +23,25 @@ products = [
     Product(id=10, name="ASUS ROG Strix G16", description="Gaming laptop with RTX graphics", price=139999.0, quantity=5)
 ]
 
+def init_db():
+    db = session()
+
+    existing_count = db.query(database_models.Product).count()
+
+    if existing_count == 0:
+        for product in products:
+            db.add(database_models.Product(**product.model_dump()))
+        db.commit()
+        print("Database initialized with sample products.")
+        
+    db.close()
+
+init_db() 
+
 @app.get("/products", response_model=list[Product])
 def show_products():
+    db=session()
+    db.query()
     return products
 
 @app.get("/products/{id}")
