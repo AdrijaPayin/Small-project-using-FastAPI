@@ -1,27 +1,16 @@
-from fastapi import FastAPI, Depends, HTTPException
-from models import Product
-from database import session, engine
-import database_models
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from models import Product  # Pydantic model
+from database import session, engine
+import database_models     # SQLAlchemy model
+
+# Create database tables if they don't exist
 database_models.Base.metadata.create_all(bind=engine)
-app = FastAPI()
 
-
-@app.get("/")
-def greet():
-    return {"message": "welcome"}
-
-
-def get_db():
-    db = session()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-products = [
+# Sample seeding data
+SAMPLE_PRODUCTS = [
     Product(id=1, name="iPhone 15", description="Apple smartphone with A16 Bionic chip", price=79999.0, quantity=15),
     Product(id=2, name="Samsung Galaxy S24", description="Android flagship smartphone", price=74999.0, quantity=20),
     Product(id=3, name="Sony WH-1000XM5", description="Noise-cancelling wireless headphones", price=29999.0, quantity=12),
@@ -34,58 +23,91 @@ products = [
     Product(id=10, name="ASUS ROG Strix G16", description="Gaming laptop with RTX graphics", price=139999.0, quantity=5)
 ]
 
-
 def init_db():
+    """Seeds the PostgreSQL database if it is empty."""
     db = session()
-    existing_count = db.query(database_models.Product).count()
-    if existing_count == 0:
-        for product in products:
-            db.add(database_models.Product(**product.model_dump()))
-        db.commit()
-        print("Database initialized with sample products.")
-    db.close()
-init_db() 
+    try:
+        existing_count = db.query(database_models.Product).count()
+        if existing_count == 0:
+            for product in SAMPLE_PRODUCTS:
+                db.add(database_models.Product(**product.model_dump()))
+            db.commit()
+            print("💾 Database initialized with sample products.")
+    finally:
+        db.close()
 
-@app.get("/products/")
+# FastAPI Lifespan management for clean initialization
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()  # Run database seeding safely on startup
+    yield
+
+app = FastAPI(
+    title="NexusCart API",
+    description="A robust backend production API for inventory management.",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Database Dependency Injection
+def get_db():
+    db = session()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@app.get("/", status_code=status.HTTP_200_OK)
+def greet():
+    return {"status": "online", "message": "Welcome to NexusCart API"}
+
+
+@app.get("/products/", status_code=status.HTTP_200_OK)
 def get_all_products(db: Session = Depends(get_db)):
-    products = db.query(database_models.Product).all()
-    return products
+    return db.query(database_models.Product).all()
 
 
-@app.get("/products/{product_id}")
+@app.get("/products/{product_id}", status_code=status.HTTP_200_OK)
 def get_product_by_id(product_id: int, db: Session = Depends(get_db)):
     product = db.query(database_models.Product).filter(database_models.Product.id == product_id).first()
-    if product:
-        return product
-    return {"error": "Product not found"}
+    if not product:
+        # Fixed: Now properly returns a 404 HTTP Exception instead of a generic dictionary
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
 
 
-@app.post("/products/")
+@app.post("/products/", status_code=status.HTTP_201_CREATED)
 def create_product(product: Product, db: Session = Depends(get_db)):
-    db.add(database_models.Product(**product.model_dump()))
+    new_product = database_models.Product(**product.model_dump())
+    db.add(new_product)
     db.commit()
-    return {"message": "Product created successfully", "product": product}
+    db.refresh(new_product)
+    return {"message": "Product created successfully", "product": new_product}
 
 
-@app.put("/products/{product_id}")
+@app.put("/products/{product_id}", status_code=status.HTTP_200_OK)
 def update_product(product_id: int, product: Product, db: Session = Depends(get_db)):
     db_product = db.query(database_models.Product).filter(database_models.Product.id == product_id).first()
     if not db_product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    
     db_product.name = product.name
     db_product.description = product.description
     db_product.price = product.price
     db_product.quantity = product.quantity
+    
     db.commit()
     db.refresh(db_product)
     return {"message": "Product updated successfully", "product": db_product}
-        
 
-@app.delete("/products/{product_id}")
+
+@app.delete("/products/{product_id}", status_code=status.HTTP_200_OK)
 def delete_product(product_id: int, db: Session = Depends(get_db)):
     db_product = db.query(database_models.Product).filter(database_models.Product.id == product_id).first()
     if not db_product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    
     db.delete(db_product)
     db.commit()
-    return {"message": "Product deleted successfully"}
+    return {"message": f"Product #{product_id} deleted successfully"}
